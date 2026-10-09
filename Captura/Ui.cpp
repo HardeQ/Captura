@@ -614,8 +614,14 @@ void Ui::UpdateAudio()
     if (!link.empty())
         audioVideoLink_ = link;
 
+    // Audio follows the picture. The short grace period keeps a brief hiccup in the
+    // video stream (for example a quality change) from restarting the audio.
+    if (renderer_.HasVideo())
+        lastVideoTime_ = now_;
+
     AudioConfig config;
     config.enabled = settings_.audioEnabled;
+    config.videoActive = now_ - lastVideoTime_ < 1.5;
     config.volume = settings_.audioVolume;
     config.muted = settings_.audioMuted;
     config.input = settings_.audioInput.empty() ? std::wstring(kAutoAudioInput) : settings_.audioInput;

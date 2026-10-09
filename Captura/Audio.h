@@ -18,6 +18,7 @@ struct AudioDevice
 struct AudioConfig
 {
     bool enabled = true;
+    bool videoActive = false; // audio only runs while video is being shown
     int volume = 100;      // 0..200 %
     bool muted = false;
     std::wstring input;    // "auto" or an endpoint id

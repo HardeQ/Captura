@@ -153,6 +153,7 @@ private:
     std::vector<AudioDevice> audioIn_, audioOut_;
     std::wstring audioVideoLink_; // last video device that was active
     double volumeUntil_ = 0;
+    double lastVideoTime_ = -100; // last time a video frame was on screen
     FormatRequest pending_;
     std::wstring lastActiveName_;
     std::vector<RowHit> hits_;

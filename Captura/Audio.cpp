@@ -150,7 +150,7 @@ void AudioEngine::Configure(const AudioConfig& config)
     muted_ = config.muted;
 
     std::lock_guard lock(mutex_);
-    const bool changed = !configured_ || config.enabled != config_.enabled || config.input != config_.input ||
+    const bool changed = !configured_ || config.enabled != config_.enabled || config.videoActive != config_.videoActive || config.input != config_.input ||
                          config.output != config_.output || config.latencyMs != config_.latencyMs ||
                          config.videoLink != config_.videoLink || config.allowAuto != config_.allowAuto;
     config_ = config;
@@ -244,6 +244,14 @@ void AudioEngine::Run()
         if (!config.enabled)
         {
             SetStatus(L"Audio is off");
+            WaitForSingleObject(wakeEvent_, INFINITE);
+            continue;
+        }
+
+        if (!config.videoActive)
+        {
+            // Nothing to listen to without a picture: leave the audio device alone.
+            SetStatus(L"Audio: waiting for video");
             WaitForSingleObject(wakeEvent_, INFINITE);
             continue;
         }

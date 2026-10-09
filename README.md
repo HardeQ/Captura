@@ -12,6 +12,7 @@ Built with C++20, Captura uses Media Foundation for video capture, Direct3D 11 f
 * **Auto-start.** After the splash screen, Captura automatically starts the last-used device or the best available match. Any input cancels the countdown.
 * **Hot-plug support.** Devices are rescanned when connected or disconnected. The video stream reconnects automatically when a device becomes available again.
 * **Video quality controls.** Configure resolution, frame rate, and pixel format using modes supported by the selected device.
+* **Audio.** The capture card's audio is matched to its video device and played through your chosen output. Audio is captured only while video is being shown, so the audio device is left alone in the menus and when there is no signal. Input and output devices, volume, mute, and latency are adjustable in the Audio menu.
 * **Picture controls.** Adjust brightness, contrast, saturation, hue, gamma, and sharpness using GPU-accelerated processing.
 * **CRT effects.** Includes scanlines, a phosphor mask, screen curvature, bloom, noise, and a power-on animation. CRT effects are enabled by default in menus and can also be applied to live video.
 * **Color palettes.** Choose from Orchid (default), Neon Rose, Ultraviolet, Midnight, Aurora, and Ember. Palettes customize the background, text, highlights, and panels.
