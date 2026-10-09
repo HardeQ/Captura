@@ -106,7 +106,7 @@ Delete this file to restore the default settings.
 
 ## Known Limitations
 
-* **Video only.** Audio from the capture card is not played.
+* Audio and video is separated, there could be a slight delay.
 * **Capture performance varies.** Advertised frame rates do not always reflect actual performance. Budget USB 2.0 capture devices may struggle with 1080p at 60 FPS. If the video stutters, try lowering the resolution or switching to MJPG format.
 * **Single video stream.** Only the first video stream exposed by a device is used.
 * **CRT processing overhead.** CRT effects require additional GPU resources. Disable them for live video if minimizing latency is a priority.
