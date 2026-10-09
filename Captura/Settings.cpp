@@ -12,6 +12,7 @@ namespace
 constexpr wchar_t kPicture[] = L"Picture";
 constexpr wchar_t kDisplay[] = L"Display";
 constexpr wchar_t kSource[] = L"Source";
+constexpr wchar_t kAudio[] = L"Audio";
 
 std::wstring IniPath()
 {
@@ -66,6 +67,15 @@ void Settings::Load()
     fullscreen = ReadInt(path, kDisplay, L"Fullscreen", 0, 0, 1) != 0;
     showFps = ReadInt(path, kDisplay, L"ShowFps", 0, 0, 1) != 0;
 
+    audioEnabled = ReadInt(path, kAudio, L"Enabled", 1, 0, 1) != 0;
+    audioVolume = ReadInt(path, kAudio, L"Volume", 100, 0, 200);
+    audioMuted = ReadInt(path, kAudio, L"Muted", 0, 0, 1) != 0;
+    audioInput = ReadString(path, kAudio, L"Input");
+    if (audioInput.empty())
+        audioInput = L"auto";
+    audioOutput = ReadString(path, kAudio, L"Output");
+    audioLatency = ReadInt(path, kAudio, L"Latency", 1, 0, 2);
+
     lastDevice = ReadString(path, kSource, L"Device");
     format.width = static_cast<UINT32>(ReadInt(path, kSource, L"Width", 0, 0, 16384));
     format.height = static_cast<UINT32>(ReadInt(path, kSource, L"Height", 0, 0, 16384));
@@ -92,6 +102,13 @@ void Settings::Save() const
     WriteInt(path, kDisplay, L"Curvature", curvature);
     WriteInt(path, kDisplay, L"Fullscreen", fullscreen);
     WriteInt(path, kDisplay, L"ShowFps", showFps);
+
+    WriteInt(path, kAudio, L"Enabled", audioEnabled);
+    WriteInt(path, kAudio, L"Volume", audioVolume);
+    WriteInt(path, kAudio, L"Muted", audioMuted);
+    Write(path, kAudio, L"Input", audioInput);
+    Write(path, kAudio, L"Output", audioOutput);
+    WriteInt(path, kAudio, L"Latency", audioLatency);
 
     Write(path, kSource, L"Device", lastDevice);
     WriteInt(path, kSource, L"Width", static_cast<int>(format.width));

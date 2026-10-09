@@ -56,13 +56,13 @@ std::wstring ShortId(const std::wstring& link)
 
 const wchar_t* PageTitle(int page)
 {
-    static const wchar_t* titles[] = {L"Select Source", L"Captura", L"Video Quality", L"Picture", L"Display"};
+    static const wchar_t* titles[] = {L"Select Source", L"Captura", L"Video Quality", L"Picture", L"Audio", L"Display"};
     return titles[page];
 }
 } // namespace
 
-Ui::Ui(HWND hwnd, CaptureEngine& engine, Renderer& renderer, Settings& settings)
-    : hwnd_(hwnd), engine_(engine), renderer_(renderer), settings_(settings)
+Ui::Ui(HWND hwnd, CaptureEngine& engine, AudioEngine& audio, Renderer& renderer, Settings& settings)
+    : hwnd_(hwnd), engine_(engine), audio_(audio), renderer_(renderer), settings_(settings)
 {
     IDWriteFactory* dw = renderer_.DWrite();
     auto make = [&](float size, DWRITE_FONT_WEIGHT weight, ComPtr<IDWriteTextFormat>& out) {
@@ -91,6 +91,7 @@ void Ui::Start(double now)
 void Ui::Update(double now)
 {
     now_ = now;
+    UpdateAudio();
     if (splash_ && now - splashStart_ >= kSplashLength)
         EndSplash();
 
@@ -204,6 +205,8 @@ void Ui::Push(Page page)
     }
     if (page == Page::Quality)
         pending_ = settings_.format;
+    if (page == Page::Audio)
+        RefreshAudioDevices();
 }
 
 void Ui::Back()
@@ -287,7 +290,9 @@ void Ui::RefreshDevices()
 void Ui::OnDevicesChanged()
 {
     RefreshDevices();
+    RefreshAudioDevices();
     engine_.Rescan();
+    audio_.Rescan();
 }
 
 // ---- Menu contents -----------------------------------------------------------
@@ -340,6 +345,7 @@ std::vector<Ui::Item> Ui::BuildItems(Page page)
     case Page::Main: BuildMain(items); break;
     case Page::Quality: BuildQuality(items); break;
     case Page::Picture: BuildPicture(items); break;
+    case Page::Audio: BuildAudio(items); break;
     case Page::Display: BuildDisplay(items); break;
     default: break;
     }
@@ -431,6 +437,12 @@ void Ui::BuildMain(std::vector<Item>& items)
     picture.detail = L"Brightness, contrast, color and sharpness";
     picture.activate = [this] { Push(Page::Picture); };
     items.push_back(std::move(picture));
+
+    Item audio;
+    audio.label = L"Audio";
+    audio.detail = L"Volume, input and output devices, latency";
+    audio.activate = [this] { Push(Page::Audio); };
+    items.push_back(std::move(audio));
 
     Item display;
     display.label = L"Display";
@@ -589,6 +601,107 @@ void Ui::BuildPicture(std::vector<Item>& items)
     items.push_back(std::move(reset));
 }
 
+void Ui::RefreshAudioDevices()
+{
+    audioIn_ = AudioEngine::EnumerateDevices(true);
+    audioOut_ = AudioEngine::EnumerateDevices(false);
+}
+
+void Ui::UpdateAudio()
+{
+    // Remember the last real video device: it is briefly empty while the stream restarts.
+    const std::wstring link = engine_.ActiveLink();
+    if (!link.empty())
+        audioVideoLink_ = link;
+
+    AudioConfig config;
+    config.enabled = settings_.audioEnabled;
+    config.volume = settings_.audioVolume;
+    config.muted = settings_.audioMuted;
+    config.input = settings_.audioInput.empty() ? std::wstring(kAutoAudioInput) : settings_.audioInput;
+    config.output = settings_.audioOutput;
+    static const int latencies[] = {40, 80, 160};
+    config.latencyMs = latencies[std::clamp(settings_.audioLatency, 0, 2)];
+    config.videoLink = audioVideoLink_;
+    for (const DeviceInfo& d : devices_)
+        if (d.link == audioVideoLink_)
+            config.allowAuto = d.kind != L"Webcam" && d.kind != L"Virtual camera";
+    audio_.Configure(config);
+}
+
+void Ui::AdjustVolume(int delta)
+{
+    settings_.audioVolume = std::clamp(settings_.audioVolume + delta, 0, 200);
+    if (delta > 0)
+        settings_.audioMuted = false;
+    volumeUntil_ = now_ + 1.8;
+}
+
+void Ui::ToggleMute()
+{
+    settings_.audioMuted = !settings_.audioMuted;
+    volumeUntil_ = now_ + 1.8;
+}
+
+void Ui::BuildAudio(std::vector<Item>& items)
+{
+    items.push_back(MakeToggle(L"Audio", L"Play the source's sound through your speakers", settings_.audioEnabled,
+                               [this] { settings_.audioEnabled = !settings_.audioEnabled; }));
+    items.push_back(MakeSlider(L"Volume", L"Software gain; above 100% boosts quiet capture cards", settings_.audioVolume,
+                               0, 200, 5, [](int v) { return std::format(L"{}%", v); }));
+    items.push_back(MakeToggle(L"Mute", L"Silence the audio without stopping capture", settings_.audioMuted,
+                               [this] { settings_.audioMuted = !settings_.audioMuted; }));
+
+    // A choice that cycles through "default" followed by every device.
+    auto deviceItem = [&](const wchar_t* label, const wchar_t* detail, std::wstring* setting,
+                          const std::vector<AudioDevice>* list, const std::wstring& defaultId,
+                          const std::wstring& defaultLabel) {
+        int index = 0;
+        if (*setting != defaultId)
+        {
+            index = -1;
+            for (size_t i = 0; i < list->size(); ++i)
+                if ((*list)[i].id == *setting)
+                    index = static_cast<int>(i) + 1;
+        }
+        Item it;
+        it.kind = Kind::Choice;
+        it.label = label;
+        it.detail = detail;
+        it.value = index < 0 ? L"Not connected" : index == 0 ? defaultLabel : (*list)[index - 1].name;
+        it.adjust = [setting, list, defaultId, index](int d) {
+            const int count = static_cast<int>(list->size()) + 1;
+            const int next = ((std::max(index, 0) + d) % count + count) % count;
+            *setting = next == 0 ? defaultId : (*list)[next - 1].id;
+        };
+        items.push_back(std::move(it));
+    };
+    deviceItem(L"Input", L"Auto picks the audio that belongs to your capture card", &settings_.audioInput, &audioIn_,
+               kAutoAudioInput, L"Auto (capture card)");
+    deviceItem(L"Output", L"Where the sound is played", &settings_.audioOutput, &audioOut_, std::wstring(),
+               L"System default");
+
+    Item latency;
+    latency.kind = Kind::Choice;
+    latency.label = L"Latency";
+    latency.detail = L"Lower stays in sync with the picture; higher avoids crackling";
+    static const wchar_t* latencyNames[] = {L"Low (40 ms)", L"Normal (80 ms)", L"High (160 ms)"};
+    const int latencyIndex = std::clamp(settings_.audioLatency, 0, 2);
+    latency.value = latencyNames[latencyIndex];
+    latency.adjust = [this, latencyIndex](int d) { settings_.audioLatency = std::clamp(latencyIndex + d, 0, 2); };
+    items.push_back(std::move(latency));
+
+    // Input level in dB, mapped from -60..0 to the bar.
+    const float peak = std::max(audio_.Level(), 1e-4f);
+    Item level;
+    level.kind = Kind::Info;
+    level.meter = true;
+    level.label = L"Input level";
+    level.detail = audio_.Status();
+    level.fraction = std::clamp((20.0f * std::log10(peak) + 60.0f) / 60.0f, 0.0f, 1.0f);
+    items.push_back(std::move(level));
+}
+
 void Ui::BuildDisplay(std::vector<Item>& items)
 {
     auto percent = [](int v) { return std::format(L"{}%", v); };
@@ -632,7 +745,13 @@ void Ui::OnAction(Action action)
     }
     if (stack_.empty())
     {
-        if (action == Action::Back || action == Action::Menu || action == Action::Confirm)
+        if (action == Action::Up)
+            AdjustVolume(5);
+        else if (action == Action::Down)
+            AdjustVolume(-5);
+        else if (action == Action::Left || action == Action::Right)
+            ToggleMute();
+        else
             OpenMenu();
         return;
     }
@@ -751,6 +870,8 @@ void Ui::OnMouseUp()
 
 void Ui::OnWheel(int delta)
 {
+    if (!splash_ && stack_.empty() && !exiting_ && delta)
+        AdjustVolume(delta > 0 ? 5 : -5);
     if (splash_ || stack_.empty() || exiting_ || !delta)
         return;
     countdownEnd_ = 0;
@@ -844,6 +965,12 @@ void Ui::Text(const std::wstring& text, IDWriteTextFormat* format, D2D1_RECT_F r
     layout->SetTextAlignment(align);
     layout->SetParagraphAlignment(valign);
     layout->SetWordWrapping(wrap ? DWRITE_WORD_WRAPPING_WRAP : DWRITE_WORD_WRAPPING_NO_WRAP);
+    ComPtr<IDWriteInlineObject> ellipsis;
+    if (!wrap && SUCCEEDED(renderer_.DWrite()->CreateEllipsisTrimmingSign(format, &ellipsis)))
+    {
+        const DWRITE_TRIMMING trimming{DWRITE_TRIMMING_GRANULARITY_CHARACTER, 0, 0};
+        layout->SetTrimming(&trimming, ellipsis.Get());
+    }
 
     ID2D1DeviceContext* dc = renderer_.D2D();
     const auto options = D2D1_DRAW_TEXT_OPTIONS_CLIP;
@@ -985,7 +1112,7 @@ void Ui::DrawRow(const Item& item, D2D1_RECT_F row, bool selected, double now, R
 
     Orb({row.left, cy}, selected ? 6.0f : 3.5f, selected ? cAccent_ : WithAlpha(cDim_, 0.7f));
 
-    const bool hasValue = item.kind == Kind::Slider || item.kind == Kind::Choice || !item.value.empty();
+    const bool hasValue = item.kind == Kind::Slider || item.kind == Kind::Choice || item.meter || !item.value.empty();
     const float textX = row.left + 24;
     const float labelRight = hasValue ? valueX - 10 : row.right - 10;
     const D2D1_COLOR_F labelColor = item.kind == Kind::Info ? cDim_ : cText_;
@@ -1025,6 +1152,15 @@ void Ui::DrawRow(const Item& item, D2D1_RECT_F row, bool selected, double now, R
              DWRITE_TEXT_ALIGNMENT_CENTER, glow, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         Text(L"▶", fDetail_.Get(), {row.right - 50, row.top, row.right - 20, row.bottom}, arrow,
              DWRITE_TEXT_ALIGNMENT_TRAILING, 0, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    }
+    else if (item.meter)
+    {
+        const D2D1_RECT_F track{valueX + 40, cy - 5, row.right - 16, cy + 5};
+        FillRound(track, 5, WithAlpha(cDim_, 0.3f));
+        D2D1_RECT_F fill = track;
+        fill.right = track.left + (track.right - track.left) * std::clamp(item.fraction, 0.0f, 1.0f);
+        if (fill.right - fill.left > 1.0f)
+            FillRound(fill, 5, item.fraction > 0.92f ? WithAlpha(cAccent_, 1.0f) : cLive_);
     }
     else if (!item.value.empty())
     {
@@ -1113,7 +1249,7 @@ void Ui::DrawMenu(double now)
              fHint_.Get(), pill, cText_, DWRITE_TEXT_ALIGNMENT_CENTER, 0.6f, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     }
 
-    const bool adjustable = page == Page::Quality || page == Page::Picture || page == Page::Display;
+    const bool adjustable = page == Page::Quality || page == Page::Picture || page == Page::Audio || page == Page::Display;
     DrawHints(668, !(launching_ && stack_.size() == 1), adjustable);
 
     const std::wstring live = engine_.ActiveName();
@@ -1138,7 +1274,7 @@ void Ui::DrawViewing(double now)
     {
         alpha_ = static_cast<float>(std::min(1.0, (osdUntil_ - now) / 0.6)) *
                  Smooth(osdUntil_ - kOsdLength, osdUntil_ - kOsdLength + 0.3, now);
-        const D2D1_RECT_F box{40, 36, 620, 150};
+        const D2D1_RECT_F box{40, 36, 620, 176};
         FillRound(box, 14, WithAlpha(cPanel_, 0.78f));
         StrokeRound(box, 14, WithAlpha(cAccent_, 0.5f), 1.5f);
         Orb({68, 72}, 6.0f, cLive_);
@@ -1149,7 +1285,29 @@ void Ui::DrawViewing(double now)
             Text(std::format(L"{}×{}  ·  {}  ·  {} fps", f.width, f.height, SubtypeName(f.subtype),
                              FpsText(f.fpsX100)),
                  fDetail_.Get(), {86, 94, 610, 116}, cDim_);
-        Text(L"Esc / Start / right-click — open menu", fDetail_.Get(), {86, 118, 610, 140}, cDim_);
+        Text(L"Esc / right-click \u2014 open menu", fDetail_.Get(), {86, 118, 610, 140}, cDim_);
+        const std::wstring audioName = audio_.ActiveInputName();
+        Text(!settings_.audioEnabled ? L"Audio: off"
+             : audioName.empty()     ? audio_.Status()
+                                     : L"Audio: " + audioName + (settings_.audioMuted ? L" (muted)" : L""),
+             fDetail_.Get(), {86, 142, 610, 164}, cDim_);
+        alpha_ = 1.0f;
+    }
+
+    if (now < volumeUntil_)
+    {
+        alpha_ = static_cast<float>(std::min(1.0, (volumeUntil_ - now) / 0.4));
+        const D2D1_RECT_F pill{430, 598, 850, 652};
+        FillRound(pill, 27, WithAlpha(cPanel_, 0.82f));
+        StrokeRound(pill, 27, WithAlpha(cAccent_, 0.5f), 1.4f);
+        Text(settings_.audioMuted ? L"Muted" : std::format(L"Volume {}%", settings_.audioVolume), fItem_.Get(),
+             {460, 598, 640, 652}, cText_, DWRITE_TEXT_ALIGNMENT_LEADING, 0.8f, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        const D2D1_RECT_F track{650, 622, 820, 628};
+        FillRound(track, 3, WithAlpha(cDim_, 0.3f));
+        D2D1_RECT_F fill = track;
+        fill.right = track.left + (track.right - track.left) * (settings_.audioMuted ? 0.0f : settings_.audioVolume / 200.0f);
+        if (fill.right - fill.left > 1.0f)
+            FillRound(fill, 3, cAccent_);
         alpha_ = 1.0f;
     }
 

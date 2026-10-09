@@ -4,19 +4,19 @@
 // first. Media Foundation captures, Direct3D 11 renders (with color controls
 // and a CRT filter) and Direct2D draws the menus.
 //
+// While watching, Up/Down change the volume and Left/Right toggle mute.
 // Keyboard: arrows navigate/adjust, Enter selects, Esc goes back / opens the
 // menu, Tab opens the menu, F11 or Alt+Enter toggles fullscreen.
-// Gamepad (XInput): D-pad/left stick, A select, B back, Start menu.
 
 #include <windows.h>
 #include <windowsx.h>
 #include <dbt.h>
 #include <mfapi.h>
-#include <Xinput.h>
 
 #include <memory>
 #include <string>
 
+#include "Audio.h"
 #include "Capture.h"
 #include "Renderer.h"
 #include "Settings.h"
@@ -32,6 +32,7 @@ constexpr UINT_PTR kSizeMoveTimer = 2;
 Settings g_settings;
 std::unique_ptr<Renderer> g_renderer;
 std::unique_ptr<CaptureEngine> g_engine;
+std::unique_ptr<AudioEngine> g_audio;
 std::unique_ptr<Ui> g_ui;
 HDEVNOTIFY g_deviceNotify = nullptr;
 WINDOWPLACEMENT g_windowedPlacement{sizeof(WINDOWPLACEMENT)};
@@ -77,64 +78,11 @@ void SetFullscreen(HWND hwnd, bool fullscreen)
     g_settings.fullscreen = fullscreen;
 }
 
-// Polls the first XInput controller and turns it into menu actions, with key
-// repeat on the directions.
-void PollGamepad(double now)
-{
-    static WORD previous = 0;
-    static double nextRepeat[4] = {};
-    static double nextConnectCheck = 0;
-    static bool connected = true;
-
-    // XInputGetState is slow for absent controllers, so only retry occasionally.
-    if (!connected && now < nextConnectCheck)
-        return;
-    XINPUT_STATE state{};
-    connected = XInputGetState(0, &state) == ERROR_SUCCESS;
-    if (!connected)
-    {
-        previous = 0;
-        nextConnectCheck = now + 1.0;
-        return;
-    }
-
-    WORD buttons = state.Gamepad.wButtons;
-    constexpr SHORT kStick = 16000;
-    if (state.Gamepad.sThumbLY > kStick) buttons |= XINPUT_GAMEPAD_DPAD_UP;
-    if (state.Gamepad.sThumbLY < -kStick) buttons |= XINPUT_GAMEPAD_DPAD_DOWN;
-    if (state.Gamepad.sThumbLX < -kStick) buttons |= XINPUT_GAMEPAD_DPAD_LEFT;
-    if (state.Gamepad.sThumbLX > kStick) buttons |= XINPUT_GAMEPAD_DPAD_RIGHT;
-
-    auto pressed = [&](WORD mask) { return (buttons & mask) && !(previous & mask); };
-    if (pressed(XINPUT_GAMEPAD_A)) g_ui->OnAction(Action::Confirm);
-    if (pressed(XINPUT_GAMEPAD_B) || pressed(XINPUT_GAMEPAD_BACK)) g_ui->OnAction(Action::Back);
-    if (pressed(XINPUT_GAMEPAD_START)) g_ui->OnAction(Action::Menu);
-
-    const WORD directions[4] = {XINPUT_GAMEPAD_DPAD_UP, XINPUT_GAMEPAD_DPAD_DOWN, XINPUT_GAMEPAD_DPAD_LEFT,
-                                XINPUT_GAMEPAD_DPAD_RIGHT};
-    const Action actions[4] = {Action::Up, Action::Down, Action::Left, Action::Right};
-    for (int i = 0; i < 4; ++i)
-    {
-        if (pressed(directions[i]))
-        {
-            g_ui->OnAction(actions[i]);
-            nextRepeat[i] = now + 0.4;
-        }
-        else if ((buttons & directions[i]) && now >= nextRepeat[i])
-        {
-            g_ui->OnAction(actions[i]);
-            nextRepeat[i] = now + 0.08;
-        }
-    }
-    previous = buttons;
-}
-
 void RenderFrame(HWND hwnd)
 {
     if (!g_renderer || !g_ui || !g_renderer->CanRender())
         return;
     const double now = Now();
-    PollGamepad(now);
     g_ui->Update(now);
     g_engine->WithFrame([](const VideoFrame& frame) { g_renderer->UploadFrame(frame); });
 
@@ -342,7 +290,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     }
     g_renderer = std::move(renderer);
     g_engine = std::make_unique<CaptureEngine>(hwnd);
-    g_ui = std::make_unique<Ui>(hwnd, *g_engine, *g_renderer, g_settings);
+    g_audio = std::make_unique<AudioEngine>();
+    g_ui = std::make_unique<Ui>(hwnd, *g_engine, *g_audio, *g_renderer, g_settings);
     g_ui->onToggleFullscreen = [hwnd] { SetFullscreen(hwnd, !g_fullscreen); };
 
     ShowWindow(hwnd, showCommand);
@@ -353,6 +302,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     }
     g_renderer->Resize();
     g_engine->Start();
+    g_audio->Start();
     g_ui->Start(Now());
 
     MSG msg{};
@@ -380,8 +330,10 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     }
 
     g_settings.Save();
+    g_audio->Stop();
     g_engine->Stop();
     g_ui.reset();
+    g_audio.reset();
     g_engine.reset();
     g_renderer.reset();
     MFShutdown();

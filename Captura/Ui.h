@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "Audio.h"
 #include "Capture.h"
 #include "Palette.h"
 #include "Renderer.h"
@@ -21,7 +22,7 @@ enum class Action { Up, Down, Left, Right, Confirm, Back, Menu };
 class Ui
 {
 public:
-    Ui(HWND hwnd, CaptureEngine& engine, Renderer& renderer, Settings& settings);
+    Ui(HWND hwnd, CaptureEngine& engine, AudioEngine& audio, Renderer& renderer, Settings& settings);
 
     void Start(double now);
     void Update(double now);
@@ -44,7 +45,7 @@ private:
     template <class T>
     using ComPtr = Microsoft::WRL::ComPtr<T>;
 
-    enum class Page { Sources, Main, Quality, Picture, Display, Count };
+    enum class Page { Sources, Main, Quality, Picture, Audio, Display, Count };
     enum class Kind { Action, Choice, Slider, Info };
 
     struct Item
@@ -52,6 +53,7 @@ private:
         std::wstring label;
         std::wstring detail;
         std::wstring value;
+        bool meter = false; // Info row that also draws a level bar (uses fraction)
         bool good = false; // draw the value in the "live" color
         Kind kind = Kind::Action;
         float fraction = 0;
@@ -74,7 +76,12 @@ private:
     void BuildMain(std::vector<Item>& items);
     void BuildQuality(std::vector<Item>& items);
     void BuildPicture(std::vector<Item>& items);
+    void BuildAudio(std::vector<Item>& items);
     void BuildDisplay(std::vector<Item>& items);
+    void UpdateAudio();
+    void RefreshAudioDevices();
+    void AdjustVolume(int delta);
+    void ToggleMute();
     static Item MakeInfo(std::wstring label, std::wstring detail);
     static Item MakeSlider(std::wstring label, std::wstring detail, int& value, int lo, int hi, int step,
                            const std::function<std::wstring(int)>& format);
@@ -114,6 +121,7 @@ private:
 
     HWND hwnd_;
     CaptureEngine& engine_;
+    AudioEngine& audio_;
     Renderer& renderer_;
     Settings& settings_;
 
@@ -142,6 +150,9 @@ private:
     bool closePosted_ = false;
 
     std::vector<DeviceInfo> devices_;
+    std::vector<AudioDevice> audioIn_, audioOut_;
+    std::wstring audioVideoLink_; // last video device that was active
+    double volumeUntil_ = 0;
     FormatRequest pending_;
     std::wstring lastActiveName_;
     std::vector<RowHit> hits_;
