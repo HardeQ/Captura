@@ -4,7 +4,7 @@ Captura is a native Windows application for viewing video from USB capture cards
 
 Built with C++20, Captura uses Media Foundation for video capture, Direct3D 11 for rendering, and Direct2D with DirectWrite for the user interface. It has no third-party runtime dependencies.
 
-![Captura source menu](docs/menu.jpg)
+![Captura splash screen](docs/splash.jpg)
 
 ## Features
 
@@ -19,7 +19,7 @@ Built with C++20, Captura uses Media Foundation for video capture, Direct3D 11 f
 * **FPS counter.** Display the measured capture frame rate on screen.
 * **Persistent settings.** Your preferences are saved between sessions.
 
-![Captura splash screen](docs/splash.jpg)
+![Captura source menu](docs/menu.jpg)
 
 ## Requirements
 
