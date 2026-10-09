@@ -40,6 +40,14 @@ struct Settings
     int curvature = 50; // 0..100
     bool fullscreen = false;
     bool showFps = false;
+    // Audio
+    bool audioEnabled = true;
+    int audioVolume = 100;             // 0..200 %
+    bool audioMuted = false;
+    std::wstring audioInput = L"auto"; // "auto" or an endpoint id
+    std::wstring audioOutput;          // empty = system default
+    int audioLatency = 1;              // 0 low, 1 normal, 2 high
+
     std::wstring lastDevice; // symbolic link, "auto", or empty if never chosen
     FormatRequest format;
 
